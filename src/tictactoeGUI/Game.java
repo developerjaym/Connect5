@@ -39,7 +39,7 @@ public class Game implements Playable {
 	}
 
 	@Override
-	public void onClick(Point p, ChangeType changeType) {
+	public void onClick(Point p, ChangeType changeType, boolean isRemote) {
 		Optional.ofNullable(this.grid).map(grid -> grid.get(p.getY()).get(p.getX()))
 				.filter(b -> b.getOccupant() == Occupant.EMPTY).ifPresent(block -> {
 					block.setOccupant(upPlayer);
@@ -48,9 +48,9 @@ public class Game implements Playable {
 					this.gameChangeStack.push(
 							new GameChange(p, 
 									convertMapToList(sequences), 
-									block.getOccupant()), changeType);
+									block.getOccupant(), isRemote), changeType);
 					subscribers.stream().forEach(subscriber -> subscriber
-							.onNext(new GameMessage(p, convertMapToList(sequences), previous)));
+							.onNext(new GameMessage(p, convertMapToList(sequences), previous, isRemote)));
 				});
 	}
 
@@ -79,24 +79,24 @@ public class Game implements Playable {
 				.collect(Collectors.toMap(SimpleEntry::getKey, SimpleEntry::getValue));
 
 		myMap.keySet().forEach(
-				(direction) -> Stream.iterate(1, i -> i + 1).limit(height > width ? height : width).forEach((i) -> {
+				(direction) -> Stream.iterate(1, i -> i + 1).limit(height > width ? height : width).forEach(i -> {
 					Optional.ofNullable(
 							getBlockInQuestion(recent, new Point(direction.getX() * i, direction.getY() * i)))
-							.filter(b -> !direction.isPositive())// stop if we've already reached a bad square in the
+							.filter(block -> !direction.isPositive())// stop if we've already reached a bad square in the
 																	// positive direction
-							.filter(b -> b.getOccupant()
+							.filter(block -> block.getOccupant()
 									.equals(this.grid.get(recent.getY()).get(recent.getX()).getOccupant()))
 							.ifPresentOrElse(
-									b -> myMap.get(direction)
+									block -> myMap.get(direction)
 											.add(new Point(recent.getX() + (direction.getX() * i),
 													recent.getY() + (direction.getY() * i))),
 									() -> direction.setPositive(true));
 
 					Optional.ofNullable(
 							getBlockInQuestion(recent, new Point(-direction.getX() * i, -direction.getY() * i)))
-							.filter(b -> !direction.isNegative())// stop if we've already reached a bad square in the
+							.filter(block -> !direction.isNegative())// stop if we've already reached a bad square in the
 																	// negative direction
-							.filter(b -> b.getOccupant()
+							.filter(block -> block.getOccupant()
 									.equals(this.grid.get(recent.getY()).get(recent.getX()).getOccupant()))
 							.ifPresentOrElse(
 									b -> myMap.get(direction)
@@ -119,21 +119,30 @@ public class Game implements Playable {
 
 	@Override
 	public void onEnd() {
-		this.upPlayer = Occupant.X;
-		this.downPlayer = Occupant.O;
+		this.gameChangeStack = new GameChangeStack();
+		resetPlayers();
 		clearBoard();
 	}
 
 	private void clearBoard() {
-		this.grid.stream().flatMap(ba -> ba.stream()).forEach(b -> b.setOccupant(Occupant.EMPTY));
-		subscribers.stream().forEach(s -> s.onComplete());
+		this.grid.stream().flatMap(blockArray -> blockArray.stream()).forEach(block -> block.setOccupant(Occupant.EMPTY));
+		subscribers.stream().forEach(subscriber -> subscriber.onComplete());
 	}
 
 	@Override
 	public void undo() {
+		resetPlayers();
 		clearBoard();
-		onEnd();
-		this.gameChangeStack.pop().ifPresent(gameChange -> this.gameChangeStack.stream().forEach(pastGameChanges -> onClick(pastGameChanges.getPointOfPlacement(), ChangeType.UNDO)));
+		this.gameChangeStack
+		.pop()
+		.ifPresent(gameChange -> this.gameChangeStack
+				.stream()
+				.forEach(pastGameChange -> onClick(pastGameChange.getPointOfPlacement(), ChangeType.UNDO, pastGameChange.isRemote())));
+	}
+	
+	private void resetPlayers() {
+		this.upPlayer = Occupant.X;
+		this.downPlayer = Occupant.O;
 	}
 }
 
